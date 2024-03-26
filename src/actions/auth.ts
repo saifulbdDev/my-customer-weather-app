@@ -1,30 +1,41 @@
-'use server';
-import { PrismaClient } from '@prisma/client';
-import { signIn, signOut } from '@/auth';
-import type { User } from '@prisma/client';
-import { AuthError } from 'next-auth';
-import { z } from 'zod';
-import bcrypt from 'bcrypt'
-import nodemailer from 'nodemailer'
-import { randomBytes } from 'crypto';
-import { redirect } from 'next/navigation';
-import { EmailNotVerifiedError } from '@/errors';
+"use server";
+import prisma from "@/lib/prisma";
+import { signIn, signOut } from "@/auth";
+import type { User } from "@prisma/client";
+import { AuthError } from "next-auth";
+import { z } from "zod";
+import bcrypt from "bcrypt";
+import nodemailer from "nodemailer";
+import { randomBytes } from "crypto";
+import { redirect } from "next/navigation";
+import { EmailNotVerifiedError } from "@/errors";
+function generateRandomPassword(length: number): string {
+  const charset =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let password = "";
 
-const prisma = new PrismaClient();
+  for (let i = 0; i < length; i++) {
+    const randomIndex = Math.floor(Math.random() * charset.length);
+    password += charset[randomIndex];
+  }
+
+  return password;
+}
+
 export async function authenticate(
   prevState: string | undefined,
-  formData: FormData,
+  formData: FormData
 ) {
   try {
-    await isUsersEmailVerified(formData.get('email') as string);
-    await signIn('credentials', formData);
+    await isUsersEmailVerified(formData.get("email") as string);
+    await signIn("credentials", formData);
   } catch (error) {
     if (error instanceof AuthError) {
       switch (error.type) {
-        case 'CredentialsSignin':
-          return 'Invalid credentials.';
+        case "CredentialsSignin":
+          return "Invalid credentials.";
         default:
-          return 'Something went wrong.';
+          return "Something went wrong.";
       }
     }
 
@@ -39,16 +50,16 @@ export async function authenticate(
 const signUpSchema = z.object({
   name: z.string().min(3).max(255),
   email: z.string().email(),
-  password: z.string().min(3).max(255),
-})
+  password: z.string().min(3).max(255)
+});
 
 interface SignUpFormState {
   errors: {
-    name?: string[],
-    email?: string[],
-    password?: string[],
-    _form?: string[],
-  }
+    name?: string[];
+    email?: string[];
+    password?: string[];
+    _form?: string[];
+  };
 }
 
 export async function signUp(
@@ -56,85 +67,82 @@ export async function signUp(
   formData: FormData
 ): Promise<SignUpFormState> {
   const result = signUpSchema.safeParse({
-    name: formData.get('name'),
-    email: formData.get('email'),
-    password: formData.get('password'),
-  })
+    name: formData.get("name"),
+    email: formData.get("email"),
+    password: formData.get("password")
+  });
 
   if (!result.success) {
     return {
       errors: result.error.flatten().fieldErrors
-    }
+    };
   }
 
-  const isEmailExists = await findUserByEmail(result.data.email)
+  const isEmailExists = await findUserByEmail(result.data.email);
 
   if (isEmailExists) {
     return {
       errors: {
-        email: [
-          'Email already exists',
-        ],
-      },
-    }
+        email: ["Email already exists"]
+      }
+    };
   }
 
   const hashed = await generatePasswordHash(result.data.password);
 
   const verificationToken = generateEmailVerificationToken();
 
-  let user: User
+  let user: User;
   try {
     user = await prisma.user.create({
       data: {
         name: result.data.name,
         email: result.data.email,
         password: hashed,
-        emailVerifToken: verificationToken,
+        emailVerifToken: verificationToken
       }
-    })
+    });
   } catch (error: unknown) {
     if (error instanceof Error) {
       return {
         errors: {
-          _form: [error.message],
-        },
-      }
-    }
-    else {
+          _form: [error.message]
+        }
+      };
+    } else {
       return {
         errors: {
-          _form: ['Something went wrong'],
-        },
-      }
+          _form: ["Something went wrong"]
+        }
+      };
     }
   }
 
-  await sendVerificationEmail(result.data.email, verificationToken)
+  await sendVerificationEmail(result.data.email, verificationToken);
 
-  redirect(`/email/verify/send?email=${result.data.email}&verification_sent=1`)
+  redirect(`/email/verify/send?email=${result.data.email}&verification_sent=1`);
 }
 
 export async function logout() {
-  return await signOut()
+  return await signOut();
 }
 
 export const findUserByEmail = async (email: string) => {
   return await prisma.user.findFirst({
     where: {
-      email,
+      email
     }
-  })
-}
+  });
+};
 
 const generatePasswordHash = async (password: string) => {
   const salt = await bcrypt.genSalt(10);
   return bcrypt.hash(password, salt);
-}
+};
 
 const generateEmailVerificationToken = () => {
-  return randomBytes(32).toString('hex')
-}
+  return randomBytes(32).toString("hex");
+};
 
 const sendVerificationEmail = async (email: string, token: string) => {
   const transporter: nodemailer.Transporter = nodemailer.createTransport({
@@ -142,43 +150,43 @@ const sendVerificationEmail = async (email: string, token: string) => {
     port: Number(process.env.EMAIL_PORT) || 0,
     auth: {
       user: process.env.MAIL_USERNAME,
-      pass: process.env.MAIL_PASSWORD,
-    },
+      pass: process.env.MAIL_PASSWORD
+    }
   });
 
   const emailData = {
     from: '"Blog Nextjs Auth" <verification@test.com>',
     to: email,
-    subject: 'Email Verification',
+    subject: "Email Verification",
     html: `
       <p>Click the link below to verify your email:</p>
       <a href="http://localhost:3000/email/verify?email=${email}&token=${token}">Verify Email</a>
-    `,
+    `
   };
 
   try {
     await transporter.sendMail(emailData);
   } catch (error) {
-    console.error('Failed to send email:', error);
-    throw error
+    console.error("Failed to send email:", error);
+    throw error;
   }
 };
 
 export const resendVerificationEmail = async (email: string) => {
-  const emailVerificationToken = generateEmailVerificationToken()
+  const emailVerificationToken = generateEmailVerificationToken();
 
   try {
     await prisma.user.update({
       where: { email },
-      data: { emailVerifToken: emailVerificationToken },
+      data: { emailVerifToken: emailVerificationToken }
     });
 
-    await sendVerificationEmail(email, emailVerificationToken)
+    await sendVerificationEmail(email, emailVerificationToken);
   } catch (error) {
-    return 'Something went wrong.'
+    return "Something went wrong.";
   }
 
-  return 'Email verification sent.'
+  return "Email verification sent.";
 };
 
 export const verifyEmail = (email: string) => {
@@ -186,19 +194,43 @@ export const verifyEmail = (email: string) => {
     where: { email },
     data: {
       emailVerifiedAt: new Date(),
-      emailVerifToken: null,
-    },
+      emailVerifToken: null
+    }
   });
-}
+};
 
 export const isUsersEmailVerified = async (email: string) => {
   const user = await prisma.user.findFirst({
-    where: { email },
+    where: { email }
   });
 
-  if (!user) return true
+  if (!user) return true;
 
-  if (!user?.emailVerifiedAt) throw new EmailNotVerifiedError(`EMAIL_NOT_VERIFIED:${email}`)
+  if (!user?.emailVerifiedAt)
+    throw new EmailNotVerifiedError(`EMAIL_NOT_VERIFIED:${email}`);
 
-  return true
+  return true;
+};
+
+export async function getUserByEmailOrCreate(payload: { name: string; email: string }): Promise<User> {
+  let user = await findUserByEmail(payload.email);
+  if (!user) {
+    // If user doesn't exist, create a new user
+    const hashedPassword = await bcrypt.hash(generateRandomPassword(8), 10); // Generate a random password for the new user
+
+    try {
+      user = await prisma.user.create({
+        data: {
+          name: payload.name,
+          email: payload.email,
+          password: hashedPassword,
+          emailVerifToken: null,
+          emailVerifiedAt: new Date()
+        }
+      });
+    } catch (error: unknown) {
+      throw new Error("Failed to create or fetch user.");
+    }
+  }
+  return user;
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { signUp } from "@/actions/auth";
 import { useFormState } from "react-dom";
 import SignupButton from "./signup-button";
+import GoogleButton from "../GoogleButton"
 
 export default function Form() {
     const [formState, action] = useFormState(signUp, {
@@ -13,7 +14,7 @@ export default function Form() {
     return (
         <div className="space-y-3 items-center">
             <form action={action}>
-                <div className="flex-1 rounded-lg bg-gray-50 px-6 pb-4 pt-8">
+                <div className="flex-1 rounded-lg sm:w-96 w-full bg-gray-50 px-6 pb-4 pt-8  sm:max-w-lg">
                     <h1 className='mb-3 text-2xl'>
                         Sign Up Now!
                     </h1>
@@ -86,6 +87,8 @@ export default function Form() {
                         }
                     </div>
                     <SignupButton />
+                    <GoogleButton />
+
                     <div className='mt-4 text-center'>
                         Already have an account?&nbsp;
                         <Link className='underline' href='/login'>Login</Link>
